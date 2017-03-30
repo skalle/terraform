@@ -108,6 +108,12 @@ func resourceAwsAlb() *schema.Resource {
 				Default:  60,
 			},
 
+			"ip_address_type": {
+				Type:     schema.TypeString,
+				Computed: true,
+				Optional: true,
+			},
+
 			"vpc_id": {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -156,6 +162,10 @@ func resourceAwsAlbCreate(d *schema.ResourceData, meta interface{}) error {
 
 	if v, ok := d.GetOk("subnets"); ok {
 		elbOpts.Subnets = expandStringList(v.(*schema.Set).List())
+	}
+
+	if v, ok := d.GetOk("ip_address_type"); ok {
+		elbOpts.IpAddressType = aws.String(v.(string))
 	}
 
 	log.Printf("[DEBUG] ALB create configuration: %#v", elbOpts)
@@ -325,6 +335,20 @@ func resourceAwsAlbUpdate(d *schema.ResourceData, meta interface{}) error {
 		}
 	}
 
+	if d.HasChange("ip_address_type") {
+
+		params := &elbv2.SetIpAddressTypeInput{
+			LoadBalancerArn: aws.String(d.Id()),
+			IpAddressType:   aws.String(d.Get("ip_address_type").(string)),
+		}
+
+		_, err := elbconn.SetIpAddressType(params)
+		if err != nil {
+			return fmt.Errorf("Failure Setting ALB IP Address Type: %s", err)
+		}
+
+	}
+
 	return resourceAwsAlbRead(d, meta)
 }
 
@@ -381,6 +405,7 @@ func flattenAwsAlbResource(d *schema.ResourceData, meta interface{}, alb *elbv2.
 	d.Set("vpc_id", alb.VpcId)
 	d.Set("zone_id", alb.CanonicalHostedZoneId)
 	d.Set("dns_name", alb.DNSName)
+	d.Set("ip_address_type", alb.IpAddressType)
 
 	respTags, err := elbconn.DescribeTags(&elbv2.DescribeTagsInput{
 		ResourceArns: []*string{alb.LoadBalancerArn},

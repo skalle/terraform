@@ -71,6 +71,7 @@ func TestAccAWSALB_basic(t *testing.T) {
 					resource.TestCheckResourceAttrSet("aws_alb.alb_test", "zone_id"),
 					resource.TestCheckResourceAttrSet("aws_alb.alb_test", "dns_name"),
 					resource.TestCheckResourceAttrSet("aws_alb.alb_test", "arn"),
+					resource.TestCheckResourceAttrSet("aws_alb.alb_test", "ip_address_type"),
 				),
 			},
 		},
@@ -202,6 +203,34 @@ func TestAccAWSALB_updatedSubnets(t *testing.T) {
 					testAccCheckAWSALBExists("aws_alb.alb_test", &post),
 					resource.TestCheckResourceAttr("aws_alb.alb_test", "subnets.#", "3"),
 					testAccCheckAWSAlbARNs(&pre, &post),
+				),
+			},
+		},
+	})
+}
+
+func TestAccAWSALB_updatedIpAddressType(t *testing.T) {
+	var pre, post elbv2.LoadBalancer
+	albName := fmt.Sprintf("testaccawsalb-basic-%s", acctest.RandStringFromCharSet(10, acctest.CharSetAlphaNum))
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:      func() { testAccPreCheck(t) },
+		IDRefreshName: "aws_alb.alb_test",
+		Providers:     testAccProviders,
+		CheckDestroy:  testAccCheckAWSALBDestroy,
+		Steps: []resource.TestStep{
+			{
+				Config: testAccAWSALBConfigWithIpAddressType(albName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckAWSALBExists("aws_alb.alb_test", &pre),
+					resource.TestCheckResourceAttr("aws_alb.alb_test", "ip_address_type", "ipv4"),
+				),
+			},
+			{
+				Config: testAccAWSALBConfigWithIpAddressTypeUpdated(albName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					testAccCheckAWSALBExists("aws_alb.alb_test", &post),
+					resource.TestCheckResourceAttr("aws_alb.alb_test", "ip_address_type", "dualstack"),
 				),
 			},
 		},
@@ -386,6 +415,154 @@ func testAccCheckAWSALBDestroy(s *terraform.State) error {
 	}
 
 	return nil
+}
+
+func testAccAWSALBConfigWithIpAddressTypeUpdated(albName string) string {
+	return fmt.Sprintf(`resource "aws_alb" "alb_test" {
+  name            = "%s"
+  security_groups = ["${aws_security_group.alb_test.id}"]
+  subnets         = ["${aws_subnet.alb_test.alb_test_1.id}", "${aws_subnet.alb_test.alb_test_2.id}"]
+
+  ip_address_type = "dualstack"
+
+  idle_timeout = 30
+  enable_deletion_protection = false
+
+  tags {
+    TestName = "TestAccAWSALB_basic"
+  }
+}
+
+resource "aws_vpc" "alb_test" {
+  cidr_block = "10.0.0.0/16"
+  assign_generated_ipv6_cidr_block = true
+
+  tags {
+    TestName = "TestAccAWSALB_basic"
+  }
+}
+
+resource "aws_subnet" "alb_test_1" {
+  vpc_id                  = "10.0.1.0/24"
+  cidr_block              = "${element(var.subnets, count.index)}"
+  map_public_ip_on_launch = true
+  availability_zone       = "us-west-2a"
+  ipv6_cidr_block = "${cidrsubnet(aws_vpc.foo.ipv6_cidr_block, 8, 1)}"
+
+  tags {
+    TestName = "TestAccAWSALB_basic"
+  }
+}
+
+resource "aws_subnet" "alb_test_2" {
+  vpc_id                  = "${aws_vpc.alb_test.id}"
+  cidr_block              = "10.0.2.0/24"
+  map_public_ip_on_launch = true
+  availability_zone       = "us-west-2b"
+  ipv6_cidr_block = "${cidrsubnet(aws_vpc.foo.ipv6_cidr_block, 8, 2)}"
+
+  tags {
+    TestName = "TestAccAWSALB_basic"
+  }
+}
+
+resource "aws_security_group" "alb_test" {
+  name        = "allow_all_alb_test"
+  description = "Used for ALB Testing"
+  vpc_id      = "${aws_vpc.alb_test.id}"
+
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags {
+    TestName = "TestAccAWSALB_basic"
+  }
+}`, albName)
+}
+
+func testAccAWSALBConfigWithIpAddressType(albName string) string {
+	return fmt.Sprintf(`resource "aws_alb" "alb_test" {
+  name            = "%s"
+  security_groups = ["${aws_security_group.alb_test.id}"]
+  subnets         = ["${aws_subnet.alb_test_1.id}", "${aws_subnet.alb_test_2.id}"]
+
+  ip_address_type = "ipv4"
+
+  idle_timeout = 30
+  enable_deletion_protection = false
+
+  tags {
+    TestName = "TestAccAWSALB_basic"
+  }
+}
+
+resource "aws_vpc" "alb_test" {
+  cidr_block = "10.0.0.0/16"
+  assign_generated_ipv6_cidr_block = true
+
+  tags {
+    TestName = "TestAccAWSALB_basic"
+  }
+}
+
+resource "aws_subnet" "alb_test_1" {
+  vpc_id                  = "${aws_vpc.alb_test.id}"
+  cidr_block              = "10.0.1.0/24"
+  map_public_ip_on_launch = true
+  availability_zone       = "us-west-2a"
+  ipv6_cidr_block = "${cidrsubnet(aws_vpc.alb_test.ipv6_cidr_block, 8, 1)}"
+
+  tags {
+    TestName = "TestAccAWSALB_basic"
+  }
+}
+
+resource "aws_subnet" "alb_test_2" {
+  vpc_id                  = "${aws_vpc.alb_test.id}"
+  cidr_block              = "10.0.2.0/24"
+  map_public_ip_on_launch = true
+  availability_zone       = "us-west-2b"
+  ipv6_cidr_block = "${cidrsubnet(aws_vpc.alb_test.ipv6_cidr_block, 8, 2)}"
+
+  tags {
+    TestName = "TestAccAWSALB_basic"
+  }
+}
+
+resource "aws_security_group" "alb_test" {
+  name        = "allow_all_alb_test"
+  description = "Used for ALB Testing"
+  vpc_id      = "${aws_vpc.alb_test.id}"
+
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags {
+    TestName = "TestAccAWSALB_basic"
+  }
+}`, albName)
 }
 
 func testAccAWSALBConfig_basic(albName string) string {
